@@ -224,3 +224,5 @@ AI-agent/
 - [LangChain Documentation](https://docs.langchain.com/)
 - [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
 - [FAISS](https://github.com/facebookresearch/faiss) — Facebook AI Research
+- [OpenAI API](https://platform.openai.com/docs/)
+- [Flask](https://flask.palletsprojects.com/)
