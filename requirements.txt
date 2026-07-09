@@ -1,0 +1,30 @@
+# LangChain / LangGraph
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-community>=0.3.0
+langgraph>=0.2.0
+
+# Vector DB (RAG)
+faiss-cpu>=1.8.0
+tiktoken>=0.7.0
+
+# GNN
+torch>=2.0.0
+torch-geometric>=2.5.0
+
+# Data
+pandas>=2.0.0
+numpy>=1.26.0
+tqdm>=4.66.0
+
+# OpenAI
+openai>=1.40.0
+
+# Env
+python-dotenv>=1.0.0
+
+# Output parsing
+pydantic>=2.0.0
+
+# Web
+flask>=3.0.0
