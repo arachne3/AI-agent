@@ -119,17 +119,27 @@ def intent_node(state: AgentState) -> dict:
 사용자 메시지를 분석하여 의도를 아래 중 하나로 분류하세요.
 
 - predict  : 환자 ID 를 주고 질병 예측을 요청하는 경우
-- explain  : 특정 질병/코드에 대한 설명이나 임상 노트 검색을 요청하는 경우
+- explain  : 특정 질병/코드에 대한 설명이나 임상 노트 검색을 요청하는 경우.
+             "이 환자 ~이랑 관련 있어?", "이 환자 ~이 뭐야?", "~에 대해 설명해줘" 등
+             질병 키워드가 포함된 질문은 환자 ID 유무와 관계없이 explain 으로 분류하세요.
 - both     : 예측 + 설명을 모두 요청하거나, 예측 후 해당 질병 설명도 원하는 경우
-- unknown  : 위 어디에도 해당하지 않는 경우
+- unknown  : 인사, 잡담 등 임상과 전혀 무관한 경우에만 사용하세요.
+             임상 관련 질문이라면 unknown 을 사용하지 마세요.
 
 【이전 대화 이력】
 {history_text}
 
 【대명사 참조 규칙】
-- "이 환자", "방금 그 환자", "같은 환자" 등의 표현이 있으면
+- "이 환자", "방금 그 환자", "같은 환자", "아까 그 환자" 등의 표현이 있으면
   이전 이력의 마지막 patient_id({state.last_patient_id})를 patient_id 로 사용하세요.
-- 환자 ID 가 명시되지 않고 이전 이력도 없으면 patient_id 는 null 로 반환하세요.
+- patient_id 는 대화 이력에서 참조하며, 없으면 null 로 반환하세요.
+
+【분류 예시】
+- "환자 188번 예측해줘"                → predict,  patient_id: 188
+- "폐렴 임상노트 검색해줘"             → explain,  patient_id: null
+- "이 환자 폐렴이랑 관련 있어?"        → explain,  patient_id: {state.last_patient_id}
+- "환자 188번 예측하고 설명도 해줘"    → both,     patient_id: 188
+- "안녕하세요"                         → unknown,  patient_id: null
 
 {format_instructions}"""
 
