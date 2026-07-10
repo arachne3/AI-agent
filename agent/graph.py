@@ -179,6 +179,11 @@ def gnn_node(state: AgentState) -> dict:
     log_tool_result("gnn_predict_tool", result_str)
 
     result_dict = json.loads(result_str)
+
+    # ✅ Tool 반환값에 error 키가 있으면 error_node 로 라우팅
+    if "error" in result_dict:
+        return {"error": result_dict["error"]}
+
     return {"gnn_result": result_dict}
 
 
@@ -272,7 +277,10 @@ Examples:
 @safe_node("report_node")
 def report_node(state: AgentState) -> dict:
     sections    = []
-    has_patient = state.patient_id is not None
+    # ✅ gnn_result 실제 존재 여부로 판단 (patient_id 유무 아님)
+    # 멀티턴에서 patient_id는 유지되더라도 이번 턴에 GNN을 안 돌렸으면
+    # 예측 템플릿 쓰면 안 됨 (LLM 환각 방지)
+    has_patient = state.gnn_result is not None and "top5_predictions" in state.gnn_result
     top1_disease = None
 
     if state.gnn_result and "top5_predictions" in state.gnn_result:
