@@ -143,7 +143,8 @@ class GNNPredictInput(BaseModel):
 
 
 class RAGSearchInput(BaseModel):
-    query: str = Field(description="검색할 질병명, ICD-9 코드, 또는 임상 키워드")
+    query:      str      = Field(description="검색할 질병명, ICD-9 코드, 또는 임상 키워드")
+    subject_id: int | None = Field(default=None, description="특정 환자 노트만 검색할 경우 SUBJECT_ID")
 
 
 # ── Tool A: GNN 질병 예측 ──────────────────────────────────────────────────────
@@ -215,10 +216,17 @@ def gnn_predict_tool(patient_id: int) -> str:
 
 # ── Tool B: RAG 임상 노트 검색 ────────────────────────────────────────────────
 @tool("rag_search_tool", args_schema=RAGSearchInput)
-def rag_search_tool(query: str) -> str:
+def rag_search_tool(query: str, subject_id: int | None = None) -> str:
     """
     질병명, ICD-9 코드, 또는 임상 키워드로 MIMIC-III Discharge summary 를 검색하고
     관련 임상 노트 발췌문을 반환한다.
+
+    subject_id 지정 시:
+      - 해당 환자의 노트만 대상으로 검색 (환자 기반 질의)
+      - "이 환자 폐렴이랑 관련있어?" 같은 질문에 사용
+    subject_id 없음:
+      - 전체 코호트에서 검색 (개념 검색)
+      - "폐렴 임상노트 검색해줘" 같은 질문에 사용
     """
     try:
         _load_vector_store()
@@ -227,31 +235,51 @@ def rag_search_tool(query: str) -> str:
 
     try:
         vs = _cache["vector_store"]
-        docs_with_scores = vs.similarity_search_with_score(query, k=RAG_TOP_K)
+
+        # subject_id 지정 시 더 많이 가져온 후 필터링
+        fetch_k = RAG_TOP_K if subject_id is None else RAG_TOP_K * 20
+        docs_with_scores = vs.similarity_search_with_score(query, k=fetch_k)
 
         if not docs_with_scores:
             return "관련 임상 노트를 찾지 못했습니다."
 
-        filtered = [
-            (doc, score)
-            for doc, score in docs_with_scores
-            if score <= RAG_SCORE_THRESHOLD
-        ]
-
-        if not filtered:
-            best_score = docs_with_scores[0][1]
-            return (
-                f"관련 임상 노트를 찾지 못했습니다. "
-                f"(검색어: '{query}' | 최고 유사도 점수: {best_score:.4f} > 임계값 {RAG_SCORE_THRESHOLD})\n"
-                f"더 구체적인 질병명이나 영문 의학 용어로 다시 질문해 보세요."
-            )
+        # ── 환자 기반 검색: subject_id 로 필터링 ──────────────────────────────
+        if subject_id is not None:
+            patient_docs = [
+                (doc, score)
+                for doc, score in docs_with_scores
+                if doc.metadata.get("subject_id") == subject_id
+            ]
+            if not patient_docs:
+                return (
+                    f"[환자 {subject_id}] 해당 환자의 임상 노트에서 "
+                    f"'{query}' 관련 내용을 찾지 못했습니다."
+                )
+            docs_with_scores = patient_docs[:RAG_TOP_K]
+            # 환자 노트 검색은 score 임계값 완화 (같은 환자 노트 내에서 찾는 것이므로)
+            filtered = docs_with_scores
+        else:
+            # ── 전체 검색: 유사도 임계값 필터링 ──────────────────────────────
+            filtered = [
+                (doc, score)
+                for doc, score in docs_with_scores
+                if score <= RAG_SCORE_THRESHOLD
+            ]
+            if not filtered:
+                best_score = docs_with_scores[0][1]
+                return (
+                    f"관련 임상 노트를 찾지 못했습니다. "
+                    f"(검색어: '{query}' | 최고 유사도 점수: {best_score:.4f} > 임계값 {RAG_SCORE_THRESHOLD})\n"
+                    f"더 구체적인 질병명이나 영문 의학 용어로 다시 질문해 보세요."
+                )
 
         results = []
         for i, (doc, score) in enumerate(filtered, start=1):
             meta    = doc.metadata
             snippet = doc.page_content[:600].replace("\n", " ")
+            prefix  = f"[환자 {subject_id} 노트]" if subject_id else f"[참고 {i}]"
             results.append(
-                f"[참고 {i}] 환자 {meta.get('subject_id', '?')} "
+                f"{prefix} 환자 {meta.get('subject_id', '?')} "
                 f"(입원 {meta.get('hadm_id', '?')}) | 유사도 점수: {score:.4f}\n"
                 f"{snippet}..."
             )

@@ -81,6 +81,7 @@ def run():
                 turn_count=final_state.get("turn_count", session_state.turn_count),
                 last_patient_id=final_state.get("last_patient_id", session_state.last_patient_id),
                 last_intent=final_state.get("last_intent", session_state.last_intent),
+                last_ground_truth=final_state.get("last_ground_truth", session_state.last_ground_truth),
             )
 
             # 에러 발생 시 로그

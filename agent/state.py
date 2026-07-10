@@ -74,8 +74,17 @@ class AgentState(BaseModel):
         description="세션 내 전체 대화 이력. report_node 완료 시 append.",
     )
     turn_count:      int       = Field(default=0, description="완료된 턴 수")
-    last_patient_id: int | None = Field(default=None, description="직전 턴의 환자 ID.")
-    last_intent:     str       = Field(default="unknown", description="직전 턴의 의도")
+    last_patient_id:   int | None        = Field(default=None, description="직전 턴의 환자 ID.")
+    last_intent:       str               = Field(default="unknown", description="직전 턴의 의도")
+    last_ground_truth: list[dict]        = Field(
+        default_factory=list,
+        description="직전 GNN 예측 턴의 실제 진단 정답. 멀티턴 환자 질의 시 참조.",
+    )
+    # ── 의도 세부 분류 ────────────────────────────────────────────────────────
+    # explain_mode:
+    #   "patient"  → "이 환자 ~이랑 관련있어?" 처럼 특정 환자 기반 검색
+    #   "general"  → "폐렴 임상노트 검색해줘" 처럼 전체 DB 검색
+    explain_mode: str = Field(default="general", description="patient | general")
 
     class Config:
         arbitrary_types_allowed = True

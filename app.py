@@ -833,6 +833,7 @@ def chat():
         turn_count=state.turn_count,
         last_patient_id=state.last_patient_id,
         last_intent=state.last_intent,
+        last_ground_truth=state.last_ground_truth,
     )
 
     try:
@@ -846,6 +847,7 @@ def chat():
         turn_count=final_state.get("turn_count", state.turn_count),
         last_patient_id=final_state.get("last_patient_id", state.last_patient_id),
         last_intent=final_state.get("last_intent", state.last_intent),
+        last_ground_truth=final_state.get("last_ground_truth", state.last_ground_truth),
     )
 
     report = final_state.get("final_report") or "응답을 생성하지 못했습니다."

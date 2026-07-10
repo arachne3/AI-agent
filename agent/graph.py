@@ -157,13 +157,25 @@ def intent_node(state: AgentState) -> dict:
         if any(kw in user_text for kw in reference_keywords):
             resolved_patient_id = state.last_patient_id
 
+    # ── explain_mode 판단 ──────────────────────────────────────────────────────
+    # "이 환자", "이 환자의" 등 특정 환자 참조 키워드가 있고
+    # 이전 환자 ID 가 존재하면 → patient 모드 (해당 환자 노트만 검색)
+    # 그 외 → general 모드 (전체 DB 검색)
+    patient_ref_keywords = ["이 환자", "그 환자", "방금", "아까", "같은 환자", "해당 환자"]
+    is_patient_query = (
+        any(kw in user_text for kw in patient_ref_keywords)
+        and state.last_patient_id is not None
+    )
+    explain_mode = "patient" if is_patient_query else "general"
+
     return {
         "intent": parsed.intent,
         "patient_id": resolved_patient_id,
+        "explain_mode": explain_mode,
         "gnn_result": None,
         "rag_result": None,
         "rag_query_used": None,
-        "rag_retry_count": 0,   # ← 재시도 카운터 리셋
+        "rag_retry_count": 0,
         "error": None,
     }
 
@@ -225,8 +237,15 @@ Examples:
         ])
         query = extraction_response.content.strip()
 
-    log_tool_call("rag_search_tool", query)
-    result_str = rag_search_tool.invoke({"query": query})
+    # ── explain_mode 에 따라 검색 방식 분기 ─────────────────────────────────
+    # patient 모드: 특정 환자 노트만 검색 ("이 환자 폐렴이랑 관련있어?")
+    # general 모드: 전체 코호트 검색  ("폐렴 임상노트 검색해줘")
+    subject_id = None
+    if state.explain_mode == "patient" and state.last_patient_id is not None:
+        subject_id = state.last_patient_id
+
+    log_tool_call("rag_search_tool", f"{query} (subject_id={subject_id})")
+    result_str = rag_search_tool.invoke({"query": query, "subject_id": subject_id})
     log_tool_result("rag_search_tool", result_str)
 
     if not result_str or result_str.strip() == "":
@@ -339,12 +358,31 @@ def report_node(state: AgentState) -> dict:
 - GNN 예측 유사도가 전반적으로 0.5 미만이면 "모델 신뢰도가 낮으므로 추가 검사가 필요합니다"라고 명시하세요.
 - 임상적으로 주의해야 할 사항을 마지막에 간략히 언급하세요."""
     else:
-        system_prompt = """당신은 임상 의학 정보 AI 입니다.
-아래 유사 임상 노트를 바탕으로 해당 질병에 대한 임상 정보를 요약하세요.
-- 검색된 임상 노트에서 발견되는 주요 증상, 치료, 검사 패턴을 정리하세요.
-- 실제 임상 노트 내용을 근거로만 설명하고, 없는 정보를 창작하지 마세요.
-- '[관련 임상 노트 없음]' 이 포함된 경우 솔직하게 "관련 노트를 찾지 못했습니다" 라고 안내하세요.
-- 마지막에 해당 질병에서 임상적으로 주의할 점을 1~2문장으로 정리하세요."""
+        # ── patient 모드: 환자 정답과 교차 분석 ──────────────────────────────
+        if state.explain_mode == "patient" and state.last_ground_truth:
+            gt_text = "\n".join([
+                f"  • [{g['icd9_code']}] {g['disease_name']}"
+                for g in state.last_ground_truth
+            ])
+            patient_ctx = f"""
+【환자 {state.last_patient_id} 실제 진단 정답】
+{gt_text}
+"""
+        else:
+            patient_ctx = ""
+
+        system_prompt = f"""당신은 ICU 임상 추론 AI 입니다.
+{patient_ctx}
+아래 임상 노트 검색 결과를 바탕으로 답변하세요.
+
+{"[환자 기반 질의 지침]" if state.explain_mode == "patient" else "[일반 검색 지침]"}
+{"- 환자의 실제 진단 정답 중 질문한 질병과 직접 관련된 항목이 있는지 먼저 확인하세요." if state.explain_mode == "patient" else "- 검색된 임상 노트에서 발견되는 주요 증상, 치료, 검사 패턴을 정리하세요."}
+{"- 직접 관련이 있으면: '환자 " + str(state.last_patient_id) + "는 [질병]과 직접 관련이 있습니다. 실제 진단에 포함되어 있습니다.' 로 시작하세요." if state.explain_mode == "patient" else ""}
+{"- 직접 관련이 없으면: '직접 진단은 없으나, [다른 진단]으로 인해 합병 가능성이 있습니다.' 로 시작하세요." if state.explain_mode == "patient" else ""}
+{"- 이후 환자의 임상 노트에서 해당 질병과 관련된 내용이 있으면 요약하세요." if state.explain_mode == "patient" else ""}
+- 실제 임상 노트 내용을 근거로만 설명하고, 없는 정보를 절대 창작하지 마세요.
+- '[관련 임상 노트 없음]' 또는 '관련 임상 노트를 찾지 못했습니다'가 포함된 경우
+  "관련 임상 노트를 찾지 못했습니다." 한 문장만 출력하고 종료하세요."""
 
     response = llm.invoke([
         SystemMessage(content=system_prompt),
@@ -367,6 +405,9 @@ def report_node(state: AgentState) -> dict:
         final_report=final_report[:300],
     )
 
+    # 정답 데이터 멀티턴 유지
+    new_ground_truth = state.gnn_result.get("actual_ground_truth", [])         if state.gnn_result else state.last_ground_truth
+
     return {
         "final_report": final_report,
         "messages": state.messages + [AIMessage(content=final_report)],
@@ -374,6 +415,7 @@ def report_node(state: AgentState) -> dict:
         "turn_count": state.turn_count + 1,
         "last_patient_id": state.patient_id if state.patient_id else state.last_patient_id,
         "last_intent": state.intent,
+        "last_ground_truth": new_ground_truth,
     }
 
 
