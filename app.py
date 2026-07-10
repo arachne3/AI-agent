@@ -827,8 +827,12 @@ def chat():
     user_text = data["message"].strip()
     state = get_session_state(sid)
 
+    # ✅ 이전 메시지 이력 + 새 메시지 합산
+    prev_messages = state.messages if state.messages else []
+    new_messages  = list(prev_messages) + [HumanMessage(content=user_text)]
+
     current_state = AgentState(
-        messages=[HumanMessage(content=user_text)],
+        messages=new_messages,                           # ← 수정
         conversation_history=state.conversation_history,
         turn_count=state.turn_count,
         last_patient_id=state.last_patient_id,
@@ -842,7 +846,7 @@ def chat():
         return jsonify({"error": f"에이전트 오류: {str(e)}"}), 500
 
     _sessions[sid] = AgentState(
-        messages=final_state.get("messages", []),
+        messages=final_state.get("messages", new_messages),  # ← 수정
         conversation_history=final_state.get("conversation_history", state.conversation_history),
         turn_count=final_state.get("turn_count", state.turn_count),
         last_patient_id=final_state.get("last_patient_id", state.last_patient_id),

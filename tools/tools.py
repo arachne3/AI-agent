@@ -234,16 +234,15 @@ def rag_search_tool(query: str, subject_id: int | None = None) -> str:
         return f"[벡터 DB 오류] {e}"
 
     try:
-        vs = _cache["vector_store"]
-
         # subject_id 지정 시 더 많이 가져온 후 필터링
-        fetch_k = RAG_TOP_K if subject_id is None else RAG_TOP_K * 20
+        vs = _cache["vector_store"]
+        fetch_k = RAG_TOP_K if subject_id is None else min(len(vs.docstore._dict), 2000)
         docs_with_scores = vs.similarity_search_with_score(query, k=fetch_k)
 
         if not docs_with_scores:
             return "관련 임상 노트를 찾지 못했습니다."
 
-        # ── 환자 기반 검색: subject_id 로 필터링 ──────────────────────────────
+        # ── 환자 기반 검색: subject_id 로 필터링 ──────────────────────
         if subject_id is not None:
             patient_docs = [
                 (doc, score)
@@ -255,8 +254,9 @@ def rag_search_tool(query: str, subject_id: int | None = None) -> str:
                     f"[환자 {subject_id}] 해당 환자의 임상 노트에서 "
                     f"'{query}' 관련 내용을 찾지 못했습니다."
                 )
+            # 유사도 점수 기준 상위 RAG_TOP_K 개만 사용
+            patient_docs.sort(key=lambda x: x[1])
             docs_with_scores = patient_docs[:RAG_TOP_K]
-            # 환자 노트 검색은 score 임계값 완화 (같은 환자 노트 내에서 찾는 것이므로)
             filtered = docs_with_scores
         else:
             # ── 전체 검색: 유사도 임계값 필터링 ──────────────────────────────
